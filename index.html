@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NetPulse</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { margin: 0; background: #0f172a; color: #f8fafc; padding: 20px; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .header h1 { margin: 0; font-size: 20px; font-weight: 600; color: #38bdf8; }
+    .badge { background: #1e293b; border: 1px solid #334155; padding: 6px 12px; border-radius: 8px; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px; }
+    .card-label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+    .card-val { font-size: 24px; font-weight: 700; margin-top: 6px; }
+    .main { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; }
+    .section-title { font-size: 14px; font-weight: 600; margin: 0 0 12px 0; color: #cbd5e1; }
+    .dns-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { background: #0f172a; color: #e2e8f0; border: 1px solid #334155; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: 0.15s; }
+    button:hover { border-color: #38bdf8; background: #1e293b; }
+    .btn-accent { background: #0284c7; border-color: #0284c7; color: white; font-weight: 600; width: 100%; margin-top: 10px; }
+    .btn-accent:hover { background: #0369a1; }
+    .status { font-size: 12px; color: #38bdf8; margin-top: 8px; min-height: 16px; }
+    .app-row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px solid #334155; font-size: 13px; }
+    .app-row:last-child { border-bottom: none; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>NetPulse <span style="color:#94a3b8;font-weight:400;">| System Bandwidth & DNS Utility</span></h1>
+    <div class="badge" id="pingBadge">Latency: -- ms</div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="card-label">Download</div><div class="card-val" id="downVal">0 KB/s</div></div>
+    <div class="card"><div class="card-label">Upload</div><div class="card-val" id="upVal">0 KB/s</div></div>
+    <div class="card"><div class="card-label">Session Usage</div><div class="card-val" id="sessVal">0 MB</div></div>
+    <div class="card"><div class="card-label">Today's Total</div><div class="card-val" id="todayVal">0 GB</div></div>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <div class="section-title">Daily Data Consumption (GB)</div>
+      <canvas id="usageChart" height="150"></canvas>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:16px;">
+      <div class="card">
+        <div class="section-title">One-Click DNS Switcher</div>
+        <div class="dns-grid">
+          <button onclick="changeDNS('1.1.1.1', '1.0.0.1')">Cloudflare (1.1.1.1)</button>
+          <button onclick="changeDNS('8.8.8.8', '8.8.4.4')">Google (8.8.8.8)</button>
+          <button onclick="changeDNS('9.9.9.9', '149.112.112.112')">Quad9 (9.9.9.9)</button>
+          <button onclick="changeDNS('auto', '')">ISP Default (Auto)</button>
+        </div>
+        <button class="btn-accent" onclick="checkPing()">Test Latency & Flush Cache</button>
+        <div class="status" id="dnsStatus">Tip: Run terminal as Admin to toggle DNS.</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">Active Network Processes</div>
+        <div id="appsList"><div style="color:#64748b;font-size:13px;">Scanning active connections...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let chart;
+    function initChart() {
+      const ctx = document.getElementById('usageChart').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: [], datasets: [{ label: 'Data Used (GB)', data: [], backgroundColor: '#38bdf8', borderRadius: 6 }] },
+        options: {
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+            y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' }, beginAtZero: true }
+          }
+        }
+      });
+    }
+
+    async function refreshStats() {
+      if (!window.pywebview) return;
+      const data = await window.pywebview.api.get_stats();
+      document.getElementById('downVal').innerText = data.down_kbps > 1024 ? (data.down_kbps/1024).toFixed(2) + ' MB/s' : data.down_kbps + ' KB/s';
+      document.getElementById('upVal').innerText = data.up_kbps > 1024 ? (data.up_kbps/1024).toFixed(2) + ' MB/s' : data.up_kbps + ' KB/s';
+      document.getElementById('sessVal').innerText = data.session_mb + ' MB';
+      document.getElementById('todayVal').innerText = data.today_gb + ' GB';
+
+      const appsDiv = document.getElementById('appsList');
+      appsDiv.innerHTML = data.top_apps.length
+        ? data.top_apps.map(a => `<div class="app-row"><span>${a.name}</span><span style="color:#38bdf8;">${a.conns} active sockets</span></div>`).join('')
+        : '<div style="color:#64748b;font-size:13px;">No active connections</div>';
+
+      if (chart && data.history.length) {
+        chart.data.labels = data.history.map(h => h.date);
+        chart.data.datasets[0].data = data.history.map(h => h.gb);
+        chart.update();
+      }
+    }
+
+    async function changeDNS(p, s) {
+      document.getElementById('dnsStatus').innerText = 'Applying DNS...';
+      const res = await window.pywebview.api.set_dns(p, s);
+      document.getElementById('dnsStatus').innerText = res.msg;
+      checkPing();
+    }
+
+    async function checkPing() {
+      const res = await window.pywebview.api.ping_test();
+      document.getElementById('pingBadge').innerText = 'Latency: ' + res.ping;
+    }
+
+    window.addEventListener('pywebviewready', () => {
+      initChart();
+      refreshStats();
+      checkPing();
+      setInterval(refreshStats, 1500);
+    });
+  </script>
+</body>
+</html>
